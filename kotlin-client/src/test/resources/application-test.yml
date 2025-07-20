@@ -1,0 +1,46 @@
+spring:
+  threads:
+    virtual:
+      enabled: true
+  
+  application:
+    name: pg-tde-client-test
+  
+  jpa:
+    hibernate:
+      # IMPORTANT: Use 'none' to preserve existing encrypted tenant data
+      # create-drop would wipe the patient data created by database setup scripts
+      ddl-auto: none
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    open-in-view: false
+
+# Test database configurations - connects to encrypted tenant databases in docker-compose environment
+# Each tenant connects to its own database with TDE encryption and dedicated Vault keys
+tenant:
+  datasources:
+    tenant-001:
+      jdbc-url: jdbc:postgresql://localhost:5433/tenant_001
+      username: postgres
+      password: postgres
+      driver-class-name: org.postgresql.Driver
+    tenant-002:
+      jdbc-url: jdbc:postgresql://localhost:5433/tenant_002
+      username: postgres
+      password: postgres
+      driver-class-name: org.postgresql.Driver
+    tenant-003:
+      jdbc-url: jdbc:postgresql://localhost:5433/tenant_003
+      username: postgres
+      password: postgres
+      driver-class-name: org.postgresql.Driver
+
+logging:
+  level:
+    com.example: DEBUG
+    org.springframework.web: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.testcontainers: INFO
