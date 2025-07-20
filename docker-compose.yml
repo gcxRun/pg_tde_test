@@ -1,0 +1,91 @@
+# PG TDE Multi-Tenant Setup with Vault Integration
+# Architecture: vault -> vault-setup -> postgres (with automated tenant DB setup) -> test-runner
+# All setup is automated - no manual script execution needed
+services:
+  vault:
+    image: hashicorp/vault:latest
+    container_name: vault-server
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: myroot
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    command: vault server -dev
+    networks:
+      - pg-tde-network
+    healthcheck:
+      test: ["CMD", "sh", "-c", "VAULT_ADDR=http://localhost:8200 vault status"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  postgres:
+    image: percona/percona-distribution-postgresql:17.5-2
+    container_name: postgres-tde
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: tde_test
+      ENABLE_PG_TDE: 1
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: myroot
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_tde
+      -c log_statement=all
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d  # TDE extension + automated setup trigger
+      - ./scripts:/scripts                          # Database setup scripts accessible from container
+    # IMPORTANT: postgres waits for vault-setup completion to ensure keys exist before database setup
+    depends_on:
+      vault:
+        condition: service_healthy
+      vault-setup:
+        condition: service_completed_successfully
+    networks:
+      - pg-tde-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  vault-setup:
+    image: curlimages/curl:latest
+    container_name: vault-setup
+    # Creates tenant encryption keys in Vault - must complete before postgres starts
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - ./scripts:/scripts
+    command: sh /scripts/01-setup-vault-keys.sh
+    networks:
+      - pg-tde-network
+
+
+  test-runner:
+    image: percona/percona-distribution-postgresql:17.5-2
+    container_name: test-runner
+    # Utility container for manual testing and verification - starts after full setup
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vault-setup:
+        condition: service_completed_successfully
+    volumes:
+      - ./scripts:/scripts
+      - postgres_data:/data:ro  # Read-only access to verify encryption on disk
+    command: tail -f /dev/null
+    networks:
+      - pg-tde-network
+
+volumes:
+  postgres_data:
+
+networks:
+  pg-tde-network:
+    driver: bridge
